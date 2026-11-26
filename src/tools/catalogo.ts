@@ -259,7 +259,7 @@ export async function actualizarProducto(
 
 export async function crearProducto(
   ctx: Contexto,
-  a: BaseEscritura & { nombre: string; categoria_id: number; precio: number; costo?: number; workshop?: number; color?: string; visible?: boolean },
+  a: BaseEscritura & { nombre: string; categoria_id: number; precio: number; costo: number; workshop?: number; color?: string; visible?: boolean },
 ) {
   return ejecutar(ctx, a, async () => {
     const [prods, cats] = await Promise.all([ctx.api.get<Obj[]>(a.cuenta, "menu.getProducts"), ctx.api.get<Obj[]>(a.cuenta, "menu.getCategories")]);
@@ -280,7 +280,7 @@ export async function crearProducto(
       modifications: 0,
       price: centavos(a.precio),
       visible: vis,
-      ...(a.costo !== undefined ? { cost: centavos(a.costo) } : {}),
+      cost: centavos(a.costo), // obligatorio: sin él Póster responde "cost is empty"
     };
     const esperado = { product_name: a.nombre, price: Object.fromEntries(spots.map((s) => [s, centavos(a.precio)])), visible: Object.fromEntries(spots.map((s) => [s, vis])) };
     return {
@@ -288,7 +288,7 @@ export async function crearProducto(
       metodo: "menu.createProduct",
       payload,
       antes: {},
-      despues: { ...payload, precio_pesos: a.precio, ...(a.costo !== undefined ? { costo_pesos: a.costo } : {}) },
+      despues: { ...payload, precio_pesos: a.precio, costo_pesos: a.costo },
       avisos: ["Crea un producto de reventa (tipo 3): sin receta; su existencia se mueve con compras a nombre del mismo producto."],
       verificar: async (r) => {
         const id = num(typeof r.response === "object" && r.response ? (r.response as Obj).product_id : r.response);
@@ -364,7 +364,7 @@ export function registrarCatalogo(s: McpServer, api: PosterApi) {
       "menu.createProduct: alta de un producto tipo 3 (sin receta) con precio en pesos. Rechaza nombre duplicado y valida la categoría; " +
       "toma spots y workshop de un producto de la misma categoría. Tras aplicar relee y verifica nombre, precio y visibilidad. Dry-run por defecto.",
     inputSchema: {
-      cuenta, nombre: z.string().min(1), categoria_id: z.number().int(), precio: z.number().min(0).describe("Pesos"), costo: z.number().min(0).optional().describe("Costo inicial en pesos (se usa hasta la primera compra)"),
+      cuenta, nombre: z.string().min(1), categoria_id: z.number().int(), precio: z.number().min(0).describe("Pesos"), costo: z.number().min(0).describe("Costo inicial en pesos, obligatorio (Póster lo usa hasta la primera compra)"),
       workshop: z.number().int().min(0).optional(), color: z.string().optional(), visible: z.boolean().optional().describe("Default true"), ...escritura,
     },
     annotations: ESCRITURA,

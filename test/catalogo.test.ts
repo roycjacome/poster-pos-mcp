@@ -119,20 +119,20 @@ describe("actualizar_producto (tipo 3)", () => {
 describe("crear_producto", () => {
   it("dry-run con precio en centavos y spots del hermano de categoría", async () => {
     const { api, post } = apiConEstado(base());
-    const r: any = await W.crearProducto(ctx(api), { ...C, nombre: "CHUNKY MACADAMIA", categoria_id: 3, precio: 50 });
-    expect(r.payload).toEqual({ product_name: "CHUNKY MACADAMIA", menu_category_id: 3, workshop: 1, weight_flag: 0, color: "grey", different_spots_prices: 0, modifications: 0, price: 5000, visible: 1 });
+    const r: any = await W.crearProducto(ctx(api), { ...C, nombre: "CHUNKY MACADAMIA", categoria_id: 3, precio: 50, costo: 30 });
+    expect(r.payload).toEqual({ product_name: "CHUNKY MACADAMIA", menu_category_id: 3, workshop: 1, weight_flag: 0, color: "grey", different_spots_prices: 0, modifications: 0, price: 5000, visible: 1, cost: 3000 });
     expect(post).not.toHaveBeenCalled();
   });
   it("aplica y verifica el producto nuevo", async () => {
     const { api } = apiConEstado(base());
-    const r: any = await W.crearProducto(ctx(api), { ...C, nombre: "CHUNKY MACADAMIA", categoria_id: 3, precio: 50, confirm: true });
+    const r: any = await W.crearProducto(ctx(api), { ...C, nombre: "CHUNKY MACADAMIA", categoria_id: 3, precio: 50, costo: 30, confirm: true });
     expect(r.verificacion.ok).toBe(true);
     expect(r.verificacion.detalle.product_id).toBe(900);
   });
   it("rechaza duplicado y categoría inexistente", async () => {
     const { api } = apiConEstado(base());
-    await expect(W.crearProducto(ctx(api), { ...C, nombre: "galleta eve", categoria_id: 3, precio: 50 })).rejects.toThrow(/renómbralo/);
-    await expect(W.crearProducto(ctx(api), { ...C, nombre: "Nuevo", categoria_id: 99, precio: 50 })).rejects.toThrow(/Categoría 99/);
+    await expect(W.crearProducto(ctx(api), { ...C, nombre: "galleta eve", categoria_id: 3, precio: 50, costo: 30 })).rejects.toThrow(/renómbralo/);
+    await expect(W.crearProducto(ctx(api), { ...C, nombre: "Nuevo", categoria_id: 99, precio: 50, costo: 30 })).rejects.toThrow(/Categoría 99/);
   });
 });
 
