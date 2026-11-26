@@ -224,16 +224,107 @@ function verificarProducto(ctx: Contexto, cuenta: string, productId: number, esp
   };
 }
 
+type Variante = { modificator_id: number; nombre?: string; precio?: number; costo?: number };
+type CambiosProducto = { product_id: number; nombre?: string; categoria_id?: number; precio?: number; visible?: boolean; color?: string; costo?: number; variantes?: Variante[] };
+
+/**
+ * Producto con variantes (modifications: 1). Contrato oficial de updateProduct: arreglos por índice de variante
+ * con su `modificator_id` existente, `modificator_name`, `barcode` y `price` (escalar por variante si
+ * different_spots_prices 0; mapa por spot si 1). `visible` por variante solo aplica con precios por spot.
+ * ⚠ updateProduct NO documenta el costo: se manda `cost[i]` y tras aplicar se relee `modificator_selfprice`;
+ * si Póster lo ignora se reporta (el costo de reventa normalmente lo fija la última compra).
+ */
+function planProductoConVariantes(ctx: Contexto, a: BaseEscritura & CambiosProducto, p: Obj): Plan {
+  const dsp = num(p.different_spots_prices) === 1 ? 1 : 0;
+  const mods: Obj[] = p.modifications;
+  const porId = new Map((a.variantes ?? []).map((v) => [v.modificator_id, v]));
+  for (const id of porId.keys()) if (!mods.some((m) => num(m.modificator_id) === id)) throw new Error(`La variante ${id} no pertenece a "${String(p.product_name).trim()}". Existen: ${mods.map((m) => `${m.modificator_id}=${m.modificator_name}`).join(", ")}`);
+  const nombres = mods.map((m) => String(m.modificator_name).trim());
+  const filas = mods.map((m) => {
+    const v = porId.get(num(m.modificator_id));
+    const spots = Object.fromEntries((m.spots ?? []).map((s: Obj) => [String(s.spot_id), num(s.price)]));
+    const vis = Object.fromEntries((m.spots ?? []).map((s: Obj) => [String(s.spot_id), String(s.visible) === "1" ? 1 : 0]));
+    const precio = v?.precio ?? a.precio;
+    const costo = v?.costo ?? a.costo;
+    const visible = a.visible;
+    return {
+      id: num(m.modificator_id),
+      nombre: v?.nombre ?? String(m.modificator_name).trim(),
+      barcode: String(m.modificator_barcode ?? ""),
+      price: precio !== undefined ? Object.fromEntries(Object.keys(spots).map((s) => [s, centavos(precio)])) : spots,
+      visible: visible !== undefined ? Object.fromEntries(Object.keys(vis).map((s) => [s, visible ? 1 : 0])) : vis,
+      cost: costo !== undefined ? centavos(costo) : num(m.modificator_selfprice),
+      costoCambia: costo !== undefined,
+    };
+  });
+  const nuevos = filas.map((f) => f.nombre);
+  const dupInterno = nuevos.find((n, i) => nuevos.findIndex((x) => norm(x) === norm(n)) !== i);
+  if (dupInterno) throw new Error(`Dos variantes quedarían con el nombre "${dupInterno}".`);
+  const primero = (o: Obj) => o[Object.keys(o)[0]];
+  const payload: Obj = {
+    id: num(p.product_id),
+    product_name: a.nombre ?? String(p.product_name).trim(),
+    menu_category_id: a.categoria_id ?? num(p.menu_category_id),
+    workshop: num(p.workshop) || 1,
+    weight_flag: num(p.weight_flag),
+    color: a.color ?? (p.color || "grey"),
+    different_spots_prices: dsp,
+    modifications: 1,
+    modificator_id: filas.map((f) => f.id),
+    modificator_name: nuevos,
+    barcode: filas.map((f) => f.barcode),
+    price: filas.map((f) => (dsp ? f.price : primero(f.price))),
+    ...(dsp ? { visible: filas.map((f) => f.visible) } : {}),
+    ...(filas.some((f) => f.costoCambia) ? { cost: filas.map((f) => f.cost) } : {}),
+  };
+  const legible = (fs: Array<{ nombre: string; price: Obj; cost: number }>) => fs.map((f) => `${f.nombre} · $${pesos(primero(f.price))} · costo $${pesos(f.cost)}`);
+  const antesFilas = mods.map((m) => ({ nombre: String(m.modificator_name).trim(), price: Object.fromEntries((m.spots ?? []).map((s: Obj) => [String(s.spot_id), num(s.price)])), cost: num(m.modificator_selfprice) }));
+  return {
+    herramienta: "actualizar_producto",
+    metodo: "menu.updateProduct",
+    payload,
+    antes: { nombre: String(p.product_name).trim(), categoria: num(p.menu_category_id), variantes: legible(antesFilas) },
+    despues: { nombre: payload.product_name, categoria: payload.menu_category_id, variantes: legible(filas) },
+    avisos: [
+      `Producto con ${mods.length} variantes (${nombres.join(", ")}): se reenvían todas con sus IDs para conservar existencias e historial.`,
+      ...(filas.some((f) => f.costoCambia) ? ["Póster no documenta cambiar el costo por updateProduct: tras aplicar se revisa si lo tomó. Si no, el costo se ajusta con la siguiente compra capturada a ese precio."] : []),
+    ],
+    verificar: async () => {
+      const v = await leerProducto(ctx.api, a.cuenta, a.product_id);
+      if (!v) return { ok: false, detalle: "no aparece" };
+      const vm: Obj[] = Array.isArray(v.modifications) ? v.modifications : [];
+      const fallas: unknown[] = [];
+      if (String(v.product_name).trim() !== String(payload.product_name).trim()) fallas.push({ nombre_esperado: payload.product_name, nombre_leido: v.product_name });
+      let costoIgnorado = false;
+      for (const f of filas) {
+        const m = vm.find((x) => num(x.modificator_id) === f.id);
+        if (!m) { fallas.push({ variante: f.id, problema: "ya no aparece (¿se recreó con otro id?)" }); continue; }
+        if (String(m.modificator_name).trim() !== f.nombre) fallas.push({ variante: f.id, nombre_esperado: f.nombre, nombre_leido: m.modificator_name });
+        for (const s of m.spots ?? []) {
+          const esperado = num(f.price[String(s.spot_id)]);
+          if (num(s.price) !== esperado) fallas.push({ variante: f.nombre, spot: s.spot_id, precio_esperado_centavos: esperado, precio_leido_centavos: num(s.price) });
+        }
+        if (f.costoCambia && num(m.modificator_selfprice) !== f.cost) costoIgnorado = true;
+      }
+      const leidas = vm.map((m) => `${String(m.modificator_name).trim()} · $${pesos(num((m.spots ?? [])[0]?.price))} · costo $${pesos(m.modificator_selfprice)}`);
+      return {
+        ok: fallas.length === 0 && !costoIgnorado,
+        detalle: { nombre: v.product_name, variantes: leidas, ...(fallas.length ? { fallas } : {}), ...(costoIgnorado ? { costo: "Póster no tomó el costo por API: se ajusta con la siguiente compra capturada a ese precio (crear_compra) o en el panel." } : {}) },
+      };
+    },
+  };
+}
+
 export async function actualizarProducto(
   ctx: Contexto,
-  a: BaseEscritura & { product_id: number; nombre?: string; categoria_id?: number; precio?: number; visible?: boolean; color?: string },
+  a: BaseEscritura & CambiosProducto,
 ) {
   return ejecutar(ctx, a, async () => {
     const p = await leerProducto(ctx.api, a.cuenta, a.product_id);
     if (!p) throw new Error(`Producto ${a.product_id} no existe en ${a.cuenta}`);
     if (num(p.type) !== 3) throw new Error(`"${String(p.product_name).trim()}" es tipo ${p.type}, no producto de reventa (3): usa renombrar_platillo.`);
-    if (conModificaciones(p)) throw new Error(`"${String(p.product_name).trim()}" tiene modificaciones (variantes con precio propio): edítalo en el panel.`);
-    if (a.nombre === undefined && a.categoria_id === undefined && a.precio === undefined && a.visible === undefined && a.color === undefined) throw new Error("Nada que cambiar.");
+    if (a.nombre === undefined && a.categoria_id === undefined && a.precio === undefined && a.visible === undefined && a.color === undefined && a.costo === undefined && !a.variantes?.length) throw new Error("Nada que cambiar.");
+    if (!conModificaciones(p) && (a.variantes?.length || a.costo !== undefined)) throw new Error(`"${String(p.product_name).trim()}" no tiene variantes. El costo de un producto simple sale de sus compras (crear_compra), no se edita.`);
     if (a.categoria_id !== undefined) {
       const cats = await ctx.api.get<Obj[]>(a.cuenta, "menu.getCategories");
       if (!cats.some((c) => num(c.category_id) === a.categoria_id)) throw new Error(`Categoría ${a.categoria_id} no existe`);
@@ -243,6 +334,7 @@ export async function actualizarProducto(
       const dup = prods.find((x) => num(x.product_id) !== a.product_id && norm(x.product_name) === norm(a.nombre!));
       if (dup) throw new Error(`Ya existe "${String(dup.product_name).trim()}" (id ${dup.product_id}) en ${a.cuenta}.`);
     }
+    if (conModificaciones(p)) return planProductoConVariantes(ctx, a, p);
     const antes = payloadProducto(p).payload;
     const { payload, esperado } = payloadProducto(p, a);
     return {
@@ -348,12 +440,19 @@ export function registrarCatalogo(s: McpServer, api: PosterApi) {
   s.registerTool("actualizar_producto", {
     title: "Actualizar producto de reventa",
     description:
-      "menu.updateProduct para productos tipo 3 (se compran y se venden tal cual, sin receta: galletas, embotellados, postres de proveedor). " +
+      "menu.updateProduct para productos tipo 3 (se compran y se venden tal cual, sin receta: galletas, embotellados, postres de proveedor), con o sin variantes. " +
+      "En productos con variantes renombra variantes y cambia su precio; el costo se intenta y se verifica (la API no lo documenta). " +
       "Cambia nombre, categoría, precio (pesos), visibilidad o color; rechaza nombres duplicados. Renombrar conserva historial de ventas y compras. " +
       "Tras aplicar relee y compara nombre, precio y visibilidad (avisa si el precio quedó 100× desviado). Dry-run por defecto.",
     inputSchema: {
       cuenta, product_id: z.number().int(), nombre: z.string().min(1).optional(), categoria_id: z.number().int().optional(),
-      precio: z.number().min(0).optional().describe("Precio en pesos, igual en todos los spots"), visible: z.boolean().optional(), color: z.string().optional(), ...escritura,
+      precio: z.number().min(0).optional().describe("Precio en pesos, igual en todos los spots (en productos con variantes: para todas)"), visible: z.boolean().optional(), color: z.string().optional(),
+      costo: z.number().min(0).optional().describe("Solo productos con variantes: costo en pesos para todas las variantes"),
+      variantes: z.array(z.object({
+        modificator_id: z.number().int().describe("ID de la variante (producto_detalle / menu.getProduct → modifications[].modificator_id)"),
+        nombre: z.string().min(1).optional(), precio: z.number().min(0).optional().describe("Pesos"), costo: z.number().min(0).optional().describe("Pesos"),
+      })).optional().describe("Productos con variantes: cambios por variante; las no listadas se reenvían igual"),
+      ...escritura,
     },
     annotations: ESCRITURA,
   }, envolver((a, extra) => actualizarProducto(ctx(extra), a)));

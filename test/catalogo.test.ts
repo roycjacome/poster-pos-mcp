@@ -24,12 +24,21 @@ const conReceta = (): Obj => ({
 });
 
 /** API falsa con estado: las escrituras mutan lo que se lee después. */
-function apiConEstado(inicial: Obj, opciones: { precioEnPesos?: boolean } = {}) {
+function apiConEstado(inicial: Obj, opciones: { precioEnPesos?: boolean; costoPorApi?: boolean } = {}) {
   const db = structuredClone(inicial);
   const prods = () => db["menu.getProducts"] as Obj[];
   const post = vi.fn(async (_c: string, metodo: string, b: Obj) => {
     if (metodo === "menu.updateProduct") {
       const p = prods().find((x) => Number(x.product_id) === b.id);
+      if (b.modifications === 1) {
+        p.product_name = b.product_name;
+        p.modifications = b.modificator_id.map((id: number, i: number) => {
+          const m = p.modifications.find((x: Obj) => Number(x.modificator_id) === id);
+          return { ...m, modificator_name: b.modificator_name[i], spots: m.spots.map((sp: Obj) => ({ ...sp, price: String(b.price[i]) })),
+            modificator_selfprice: opciones.costoPorApi && b.cost ? String(b.cost[i]) : m.modificator_selfprice };
+        });
+        return { response: { product_id: b.id, modifications_id: b.modificator_id } };
+      }
       if (b.modifications !== 0) return { error: 34, message: "modifications is empty" };
       p.product_name = b.product_name;
       const spots = Object.keys(p.price);
@@ -73,8 +82,17 @@ function apiConEstado(inicial: Obj, opciones: { precioEnPesos?: boolean } = {}) 
   return { api, post, db };
 }
 const ctx = (api: PosterApi) => ({ api, actor: "test" });
+// Producto con variantes (forma real de Justicia 616, leída el 25 nov 2026)
+const conVariantes = (): Obj => ({
+  product_id: "616", product_name: "Galleta chunky", menu_category_id: "3", workshop: "0", type: "3", color: "grey", weight_flag: "0",
+  different_spots_prices: "0", barcode: "",
+  modifications: [
+    { modificator_id: "1528", modificator_name: "chispas de chocolate", modificator_selfprice: "2500", modificator_barcode: "", spots: [{ spot_id: "1", price: "5500", visible: "1" }] },
+    { modificator_id: "1529", modificator_name: "macadamia", modificator_selfprice: "2500", modificator_barcode: "", spots: [{ spot_id: "1", price: "5500", visible: "1" }] },
+  ],
+});
 const base = () => ({
-  "menu.getProducts": [galleta(), triple(), conReceta()],
+  "menu.getProducts": [galleta(), triple(), conReceta(), conVariantes()],
   "menu.getCategories": [{ category_id: "3", category_name: "Postres" }],
   "menu.getIngredients": [{ ingredient_id: "317", ingredient_name: "Galleta Eve", category_id: "2", ingredient_unit: "p" }, { ingredient_id: "318", ingredient_name: "Leche", category_id: "1", ingredient_unit: "l" }],
   "storage.getSuppliers": [
@@ -158,5 +176,34 @@ describe("renombrar insumo", () => {
     const r: any = await W.renombrarInsumo(ctx(api), { ...C, ingredient_id: 317, nombre: "CHUNKY CHISPAS", confirm: true });
     expect(r.verificacion.ok).toBe(true);
     await expect(W.renombrarInsumo(ctx(api), { ...C, ingredient_id: 317, nombre: "leche" })).rejects.toThrow(/Ya existe/);
+  });
+});
+
+describe("actualizar_producto con variantes", () => {
+  it("dry-run: renombra producto y variantes, precio y costo para todas", async () => {
+    const { api, post } = apiConEstado(base());
+    const r: any = await W.actualizarProducto(ctx(api), { ...C, product_id: 616, nombre: "GALLETA CHUNKY", precio: 50, costo: 30,
+      variantes: [{ modificator_id: 1528, nombre: "CHISPAS" }, { modificator_id: 1529, nombre: "MACADAMIA" }] });
+    expect(r.payload).toMatchObject({ id: 616, modifications: 1, modificator_id: [1528, 1529], modificator_name: ["CHISPAS", "MACADAMIA"], price: [5000, 5000], cost: [3000, 3000], barcode: ["", ""] });
+    expect(r.payload.visible).toBeUndefined();
+    expect(post).not.toHaveBeenCalled();
+  });
+  it("aplica: verifica nombres y precios; avisa si Póster ignoró el costo", async () => {
+    const { api } = apiConEstado(base());
+    const r: any = await W.actualizarProducto(ctx(api), { ...C, product_id: 616, nombre: "GALLETA CHUNKY", costo: 30,
+      variantes: [{ modificator_id: 1528, nombre: "CHISPAS" }, { modificator_id: 1529, nombre: "MACADAMIA" }], confirm: true });
+    expect(r.verificacion.ok).toBe(false);
+    expect(r.verificacion.detalle.fallas).toBeUndefined();
+    expect(r.verificacion.detalle.costo).toMatch(/no tomó el costo/);
+  });
+  it("aplica con costo aceptado: ok", async () => {
+    const { api } = apiConEstado(base(), { costoPorApi: true });
+    const r: any = await W.actualizarProducto(ctx(api), { ...C, product_id: 616, costo: 30, confirm: true });
+    expect(r.verificacion.ok).toBe(true);
+  });
+  it("rechaza variante ajena y costo en producto simple", async () => {
+    const { api } = apiConEstado(base());
+    await expect(W.actualizarProducto(ctx(api), { ...C, product_id: 616, variantes: [{ modificator_id: 9, nombre: "X" }] })).rejects.toThrow(/no pertenece/);
+    await expect(W.actualizarProducto(ctx(api), { ...C, product_id: 638, costo: 30 })).rejects.toThrow(/no tiene variantes/);
   });
 });
