@@ -32,11 +32,15 @@ las 10 cuentas Póster de la red RUSH desde claude.ai (también en el celular), 
 `crear_platillo` (createDish con receta y grupos; relee y verifica), `ocultar_platillo` (getProduct + updateDish COMPLETO con receta, visible 0 y sufijo " (old)"),
 `crear_transaccion` (finance.createTransactions: `type` 0 gasto / 1 ingreso / 2 transferencia es OBLIGATORIO; la categoría va como `category` (id, no `category_id`); **el monto se envía en PESOS** —finance.createTransactions NO usa centavos, al revés que el resto de la API—; valida `account_id` y `category` contra `finance.getAccounts`/`getCategories` y tras aplicar relee `finance.getTransactions` avisando si el monto quedó 100× desviado),
 `crear_compra` ahora acepta `account_id` opcional (paga al momento; sin él la compra queda a crédito),
-`asignar_pago_compra` (storage.updateSupply: el botón "pagar" por API — asigna/reasigna la cuenta de Finanzas de una compra a crédito; relee y verifica que el total y los renglones no cambiaron),
-`actualizar_producto` (menu.updateProduct para productos de reventa tipo 3: nombre, precio, visibilidad), `crear_producto` (menu.createProduct, tipo 3 sin receta),
-`renombrar_insumo` (menu.updateIngredient), `renombrar_proveedor` (storage.updateSupplier). Sirven para estandarizar catálogos en toda la red (ej. galletas Chunky).
+`asignar_pago_compra` (storage.updateSupply: el botón "pagar" por API — asigna/reasigna la cuenta de Finanzas de una compra a crédito; relee y verifica que el total y los renglones no cambiaron).
 
-**Solo panel web**: permisos de puestos. `actualizar_platillo` ya cambia nombre/precio/visibilidad de platillos **con receta**: reenvía la receta completa (como `ocultar_platillo`) y verifica que quedó intacta.
+**Catálogo de red** (`src/tools/catalogo.ts`, módulo independiente): `actualizar_producto` y `crear_producto` (tipo 3, reventa sin receta),
+`renombrar_platillo` (tipo 2 con o sin receta: la reenvía y verifica), `renombrar_insumo`, `renombrar_proveedor`.
+⚠ Contratos de `menu.updateProduct`, `menu.createProduct`, `menu.updateIngredient` y `storage.updateSupplier` sin verificar en vivo:
+se releen y verifican tras aplicar (alerta si el precio queda 100× desviado). Probar primero en una sola cuenta.
+Instalar encima de una copia local más nueva: `bash scripts/instalar-catalogo.sh "/ruta/a/poster-mcp"`.
+
+**Solo panel web**: editar la receta de un platillo existente (actualizar_platillo rechaza platillos con receta) y permisos de puestos.
 
 ## Contratos de Póster (aprendidos en la migración de la 47)
 
@@ -55,11 +59,6 @@ API: `https://<cuenta>.joinposter.com/api/<metodo>?token=…`. Escrituras con cu
 - `menu.getProduct {product_id}` sí responde (probado 23 oct 2026) con receta y grupos; las altas lo usan y caen a `menu.getProducts` si falla.
 - `createDish`/`updateDish` aceptan `ingredient:[{id,type,brutto,netto,lock}]`: con eso la receta se conserva al ocultar.
 - `menu.updateCategory {category_id, category_name, parent_category}` funciona.
-
-**Productos de reventa (tipo 3)** — ⚠ contratos sin verificar en vivo
-- `menu.updateProduct` / `menu.createProduct`: se envían como updateDish (`price` y `visible` = mapas por spot, precio en **centavos**) y en update se mandan `id` y `product_id`.
-  Tras aplicar se relee y se comparan nombre, precio y visibilidad; si el precio quedó 100× desviado se marca `alerta_100x`. Probar primero en una sola cuenta.
-- `menu.updateIngredient {id, ingredient_id, ingredient_name, category_id, type, weight_ingredient}` y `storage.updateSupplier` (update completo con teléfono, dirección, RFC y comentario): mismo criterio, se relee y verifica.
 
 **Precocinados**
 - `menu.updatePrepack` acepta receta por API y la **reemplaza completa**:

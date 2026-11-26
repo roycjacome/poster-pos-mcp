@@ -71,14 +71,10 @@ describe("contrato updateDish", () => {
     expect(r.cambios).toEqual([{ campo: "modificationgroup.0.modifications.1.price", antes: 6500, despues: 7000 }]);
   });
 
-  it("platillo con receta: reenvía la receta completa y solo cambia lo pedido", async () => {
-    const p = { ...americano(), ingredients: [{ ingredient_id: "60", structure_type: "1", structure_brutto: "100", structure_netto: "100", structure_lock: "1" }] };
+  it("rechaza platillo con receta (updateDish la borraría)", async () => {
+    const p = { ...americano(), ingredients: [{ ingredient_id: "60", structure_brutto: "100" }] };
     const { api, post } = apiFalsa({ "menu.getProducts": [p] });
-    const r: any = await W.actualizarPlatillo(ctx(api), { cuenta: "cafe-04", product_id: 271, nombre: "Americano clásico" });
-    expect(r.modo).toBe("dry-run");
-    expect(r.payload.ingredient).toEqual([{ id: 60, type: 1, brutto: 100, netto: 100, lock: 1 }]);
-    expect(r.payload["ingredient[]"]).toBeUndefined();
-    expect(r.cambios).toEqual([{ campo: "product_name", antes: "Americano", despues: "Americano clásico" }]);
+    await expect(W.actualizarPlatillo(ctx(api), { cuenta: "cafe-04", product_id: 271, visible: false, confirm: true })).rejects.toThrow(/tiene receta/);
     expect(post).not.toHaveBeenCalled();
   });
 

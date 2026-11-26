@@ -1,7 +1,10 @@
 // Estandarizar catálogo: actualizar_producto, crear_producto, renombrar_insumo, renombrar_proveedor
 // y actualizar_platillo sobre platillos con receta (ej. galletas Chunky en toda la red).
 import { describe, it, expect, vi } from "vitest";
-import * as W from "../src/tools/escritura.js";
+import * as W from "../src/tools/catalogo.js";
+import { CUENTAS } from "../src/config.js";
+
+const C = { cuenta: CUENTAS[0] as string, permitir_otra_cuenta: true };
 import type { PosterApi } from "../src/poster.js";
 
 type Obj = Record<string, any>;
@@ -79,7 +82,7 @@ const base = () => ({
 describe("actualizar_producto (tipo 3)", () => {
   it("dry-run: renombra sin tocar precio ni visibilidad y no escribe", async () => {
     const { api, post } = apiConEstado(base());
-    const r: any = await W.actualizarProducto(ctx(api), { cuenta: "cafe-04", product_id: 638, nombre: "CHUNKY CHISPAS" });
+    const r: any = await W.actualizarProducto(ctx(api), { ...C, product_id: 638, nombre: "CHUNKY CHISPAS" });
     expect(r.modo).toBe("dry-run");
     expect(r.metodo).toBe("menu.updateProduct");
     expect(r.cambios).toEqual([{ campo: "product_name", antes: "Galleta Eve", despues: "CHUNKY CHISPAS" }]);
@@ -89,22 +92,22 @@ describe("actualizar_producto (tipo 3)", () => {
 
   it("aplica y verifica nombre + precio leyendo de vuelta", async () => {
     const { api } = apiConEstado(base());
-    const r: any = await W.actualizarProducto(ctx(api), { cuenta: "cafe-04", product_id: 737, nombre: "CHUNKY TRIPLE CHOCO", precio: 55, confirm: true });
+    const r: any = await W.actualizarProducto(ctx(api), { ...C, product_id: 737, nombre: "CHUNKY TRIPLE CHOCO", precio: 55, confirm: true });
     expect(r.modo).toBe("aplicado");
     expect(r.verificacion.ok).toBe(true);
   });
 
   it("marca alerta si Póster guardó el precio 100× desviado", async () => {
     const { api } = apiConEstado(base(), { precioEnPesos: true });
-    const r: any = await W.actualizarProducto(ctx(api), { cuenta: "cafe-04", product_id: 638, precio: 50, confirm: true });
+    const r: any = await W.actualizarProducto(ctx(api), { ...C, product_id: 638, precio: 50, confirm: true });
     expect(r.verificacion.ok).toBe(false);
     expect(JSON.stringify(r.verificacion.detalle)).toMatch(/alerta_100x/);
   });
 
   it("rechaza nombre duplicado y platillos tipo 2", async () => {
     const { api, post } = apiConEstado(base());
-    await expect(W.actualizarProducto(ctx(api), { cuenta: "cafe-04", product_id: 638, nombre: "galleta triple chocolate eve" })).rejects.toThrow(/Ya existe/);
-    await expect(W.actualizarProducto(ctx(api), { cuenta: "cafe-04", product_id: 710, nombre: "X" })).rejects.toThrow(/actualizar_platillo/);
+    await expect(W.actualizarProducto(ctx(api), { ...C, product_id: 638, nombre: "galleta triple chocolate eve" })).rejects.toThrow(/Ya existe/);
+    await expect(W.actualizarProducto(ctx(api), { ...C, product_id: 710, nombre: "X" })).rejects.toThrow(/actualizar_platillo/);
     expect(post).not.toHaveBeenCalled();
   });
 });
@@ -112,51 +115,51 @@ describe("actualizar_producto (tipo 3)", () => {
 describe("crear_producto", () => {
   it("dry-run con precio en centavos y spots del hermano de categoría", async () => {
     const { api, post } = apiConEstado(base());
-    const r: any = await W.crearProducto(ctx(api), { cuenta: "cafe-04", nombre: "CHUNKY MACADAMIA", categoria_id: 3, precio: 50 });
+    const r: any = await W.crearProducto(ctx(api), { ...C, nombre: "CHUNKY MACADAMIA", categoria_id: 3, precio: 50 });
     expect(r.payload).toEqual({ product_name: "CHUNKY MACADAMIA", menu_category_id: 3, workshop: 1, weight_flag: 0, color: "grey", price: { "1": 5000 }, visible: { "1": 1 } });
     expect(post).not.toHaveBeenCalled();
   });
   it("aplica y verifica el producto nuevo", async () => {
     const { api } = apiConEstado(base());
-    const r: any = await W.crearProducto(ctx(api), { cuenta: "cafe-04", nombre: "CHUNKY MACADAMIA", categoria_id: 3, precio: 50, confirm: true });
+    const r: any = await W.crearProducto(ctx(api), { ...C, nombre: "CHUNKY MACADAMIA", categoria_id: 3, precio: 50, confirm: true });
     expect(r.verificacion.ok).toBe(true);
     expect(r.verificacion.detalle.product_id).toBe(900);
   });
   it("rechaza duplicado y categoría inexistente", async () => {
     const { api } = apiConEstado(base());
-    await expect(W.crearProducto(ctx(api), { cuenta: "cafe-04", nombre: "galleta eve", categoria_id: 3, precio: 50 })).rejects.toThrow(/renómbralo/);
-    await expect(W.crearProducto(ctx(api), { cuenta: "cafe-04", nombre: "Nuevo", categoria_id: 99, precio: 50 })).rejects.toThrow(/Categoría 99/);
+    await expect(W.crearProducto(ctx(api), { ...C, nombre: "galleta eve", categoria_id: 3, precio: 50 })).rejects.toThrow(/renómbralo/);
+    await expect(W.crearProducto(ctx(api), { ...C, nombre: "Nuevo", categoria_id: 99, precio: 50 })).rejects.toThrow(/Categoría 99/);
   });
 });
 
-describe("actualizar_platillo con receta", () => {
+describe("renombrar_platillo con receta", () => {
   it("renombra y la receta sigue intacta tras aplicar", async () => {
     const { api, post } = apiConEstado(base());
-    const r: any = await W.actualizarPlatillo(ctx(api), { cuenta: "cafe-04", product_id: 710, nombre: "CHUNKY CHISPAS", confirm: true });
+    const r: any = await W.renombrarPlatillo(ctx(api), { ...C, product_id: 710, nombre: "CHUNKY CHISPAS", confirm: true });
     expect(post.mock.calls[0][2].ingredient).toEqual([{ id: 512, type: 1, brutto: 1, netto: 1, lock: 1 }]);
     expect(r.verificacion.ok).toBe(true);
     expect(r.verificacion.detalle.receta_intacta).toBe(true);
   });
   it("manda los productos tipo 3 a actualizar_producto", async () => {
     const { api } = apiConEstado(base());
-    await expect(W.actualizarPlatillo(ctx(api), { cuenta: "cafe-04", product_id: 638, nombre: "X" })).rejects.toThrow(/actualizar_producto/);
+    await expect(W.renombrarPlatillo(ctx(api), { ...C, product_id: 638, nombre: "X" })).rejects.toThrow(/actualizar_producto/);
   });
 });
 
 describe("renombrar insumo y proveedor", () => {
   it("insumo: conserva categoría y unidad; verifica", async () => {
     const { api } = apiConEstado(base());
-    const dry: any = await W.renombrarInsumo(ctx(api), { cuenta: "cafe-04", ingredient_id: 317, nombre: "CHUNKY CHISPAS" });
+    const dry: any = await W.renombrarInsumo(ctx(api), { ...C, ingredient_id: 317, nombre: "CHUNKY CHISPAS" });
     expect(dry.payload).toMatchObject({ ingredient_id: 317, ingredient_name: "CHUNKY CHISPAS", category_id: 2, type: "p" });
-    const r: any = await W.renombrarInsumo(ctx(api), { cuenta: "cafe-04", ingredient_id: 317, nombre: "CHUNKY CHISPAS", confirm: true });
+    const r: any = await W.renombrarInsumo(ctx(api), { ...C, ingredient_id: 317, nombre: "CHUNKY CHISPAS", confirm: true });
     expect(r.verificacion.ok).toBe(true);
-    await expect(W.renombrarInsumo(ctx(api), { cuenta: "cafe-04", ingredient_id: 317, nombre: "leche" })).rejects.toThrow(/Ya existe/);
+    await expect(W.renombrarInsumo(ctx(api), { ...C, ingredient_id: 317, nombre: "leche" })).rejects.toThrow(/Ya existe/);
   });
   it("proveedor: reenvía teléfono y comentario; rechaza duplicado", async () => {
     const { api, post } = apiConEstado(base());
-    const r: any = await W.renombrarProveedor(ctx(api), { cuenta: "cafe-04", supplier_id: 21, nombre: "Evelyn Zavala · Chunky", confirm: true });
+    const r: any = await W.renombrarProveedor(ctx(api), { ...C, supplier_id: 21, nombre: "Evelyn Zavala · Chunky", confirm: true });
     expect(post.mock.calls[0][2]).toMatchObject({ supplier_phone: "938 000 0000", supplier_comment: "Villa Marina" });
     expect(r.verificacion.ok).toBe(true);
-    await expect(W.renombrarProveedor(ctx(api), { cuenta: "cafe-04", supplier_id: 21, nombre: "evelyn zavala" })).rejects.toThrow(/Ya existe/);
+    await expect(W.renombrarProveedor(ctx(api), { ...C, supplier_id: 21, nombre: "evelyn zavala" })).rejects.toThrow(/Ya existe/);
   });
 });

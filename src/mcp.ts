@@ -7,6 +7,7 @@ import { auditoriaReciente } from "./audit.js";
 import { redactar } from "./tokens.js";
 import * as L from "./tools/lectura.js";
 import * as W from "./tools/escritura.js";
+import { registrarCatalogo } from "./tools/catalogo.js";
 
 const cuenta = z.enum(CUENTAS).describe("Cuenta Póster de la red RUSH");
 const cuentaEscritura = z.enum(CUENTAS).default("cafe-04").describe("Cuenta destino (por defecto cafe-04)");
@@ -36,7 +37,7 @@ export function crearServidorMcp(api: PosterApi = posterHttp) {
       "Herramientas para leer y configurar las cuentas Póster POS de la red RUSH Café. " +
       "Lecturas en cualquier cuenta de la lista blanca. Escrituras: siempre primero en dry-run (confirm:false), mostrar el diff a Roy, " +
       "y solo aplicar con confirm:true tras su OK. Por defecto solo cafe-04; otra cuenta requiere permitir_otra_cuenta:true y autorización explícita. " +
-      "Productos fuera de carta se OCULTAN (ocultar_platillo); solo se borran con borrar_platillo_old si Roy lo pide para liberar lugar del plan. Platillos nuevos con receta: crear_platillo. actualizar_platillo renombra o cambia precio también a platillos con receta (la reenvía y verifica). Productos de reventa (tipo 3): actualizar_producto y crear_producto. Insumos y proveedores: renombrar_insumo y renombrar_proveedor. Permisos de puestos solo en panel web.",
+      "Productos fuera de carta se OCULTAN (ocultar_platillo); solo se borran con borrar_platillo_old si Roy lo pide para liberar lugar del plan. Platillos nuevos con receta: crear_platillo. actualizar_platillo no toca platillos con receta; permisos de puestos solo en panel web.",
   });
   const ctx = (extra: any): W.Contexto => ({
     api,
@@ -178,8 +179,7 @@ export function crearServidorMcp(api: PosterApi = posterHttp) {
     title: "Actualizar platillo",
     description:
       "menu.updateDish (update COMPLETO). Cambia nombre, categoría, precio (pesos), visibilidad, color o precio de opciones (pesos). " +
-      "Si el platillo tiene receta, la reenvía completa con sus grupos para no borrarla y tras aplicar verifica que quedó intacta. " +
-      "Solo platillos (tipo 2); productos de reventa (tipo 3) van con actualizar_producto. Para sacar de carta usa visible:false (no borrar). Dry-run por defecto.",
+      "Rechaza platillos con receta (updateDish la borraría). Para sacar de carta usa visible:false (no borrar). Dry-run por defecto.",
     inputSchema: {
       cuenta: cuentaEscritura,
       product_id: z.number().int(),
@@ -193,57 +193,6 @@ export function crearServidorMcp(api: PosterApi = posterHttp) {
     },
     annotations: ESCRITURA,
   }, envolver((a, extra) => W.actualizarPlatillo(ctx(extra), a)));
-
-  s.registerTool("actualizar_producto", {
-    title: "Actualizar producto de reventa",
-    description:
-      "menu.updateProduct para productos tipo 3 (se compran y se venden tal cual, sin receta: galletas, embotellados, postres de proveedor). " +
-      "Cambia nombre, categoría, precio (pesos), visibilidad o color; rechaza nombres duplicados. Renombrar conserva historial de ventas y compras. " +
-      "Tras aplicar relee y compara nombre, precio y visibilidad (avisa si el precio quedó 100× desviado). Dry-run por defecto.",
-    inputSchema: {
-      cuenta: cuentaEscritura,
-      product_id: z.number().int(),
-      nombre: z.string().min(1).optional(),
-      categoria_id: z.number().int().optional(),
-      precio: z.number().min(0).optional().describe("Precio en pesos, igual en todos los spots"),
-      visible: z.boolean().optional(),
-      color: z.string().optional(),
-      ...escritura,
-    },
-    annotations: ESCRITURA,
-  }, envolver((a, extra) => W.actualizarProducto(ctx(extra), a)));
-
-  s.registerTool("crear_producto", {
-    title: "Crear producto de reventa",
-    description:
-      "menu.createProduct: alta de un producto tipo 3 (sin receta) con precio en pesos. Rechaza nombre duplicado y valida la categoría; " +
-      "toma spots y workshop de un producto de la misma categoría. Tras aplicar relee y verifica nombre, precio y visibilidad. Dry-run por defecto.",
-    inputSchema: {
-      cuenta: cuentaEscritura,
-      nombre: z.string().min(1),
-      categoria_id: z.number().int(),
-      precio: z.number().min(0).describe("Pesos"),
-      workshop: z.number().int().min(0).optional(),
-      color: z.string().optional(),
-      visible: z.boolean().optional().describe("Default true"),
-      ...escritura,
-    },
-    annotations: ESCRITURA,
-  }, envolver((a, extra) => W.crearProducto(ctx(extra), a)));
-
-  s.registerTool("renombrar_insumo", {
-    title: "Renombrar insumo",
-    description: "menu.updateIngredient: cambia solo el nombre de un insumo (conserva categoría, unidad, existencias y recetas que lo usan). Rechaza duplicados; relee y verifica. Dry-run por defecto.",
-    inputSchema: { cuenta: cuentaEscritura, ingredient_id: z.number().int(), nombre: z.string().min(1), ...escritura },
-    annotations: ESCRITURA,
-  }, envolver((a, extra) => W.renombrarInsumo(ctx(extra), a)));
-
-  s.registerTool("renombrar_proveedor", {
-    title: "Renombrar proveedor",
-    description: "storage.updateSupplier: cambia el nombre de un proveedor reenviando sus demás datos tal como están (conserva su historial de compras). Rechaza duplicados; relee y verifica. Dry-run por defecto.",
-    inputSchema: { cuenta: cuentaEscritura, supplier_id: z.number().int(), nombre: z.string().min(1), ...escritura },
-    annotations: ESCRITURA,
-  }, envolver((a, extra) => W.renombrarProveedor(ctx(extra), a)));
 
   s.registerTool("actualizar_categoria", {
     title: "Actualizar categoría del menú",
@@ -373,5 +322,6 @@ export function crearServidorMcp(api: PosterApi = posterHttp) {
     annotations: ESCRITURA,
   }, envolver((a, extra) => W.crearTransaccion(ctx(extra), a)));
 
+  registrarCatalogo(s, api);
   return s;
 }
