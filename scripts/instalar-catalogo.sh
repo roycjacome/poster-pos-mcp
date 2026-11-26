@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Instala las herramientas de catálogo (actualizar_producto, crear_producto, renombrar_platillo,
-# renombrar_insumo, renombrar_proveedor) ENCIMA de la copia local del MCP y redespliega.
+# renombrar_insumo) ENCIMA de la copia local del MCP y redespliega.
 # No sobrescribe escritura.ts ni mcp.ts: agrega src/tools/catalogo.ts y dos líneas de registro en mcp.ts.
 # Uso: bash instalar-catalogo.sh ["/ruta/a/codigo/poster-mcp"]
 set -euo pipefail
@@ -36,5 +36,5 @@ B=$(gcloud secrets versions access latest --secret=poster-mcp-bearer --project="
 echo "▶ Herramientas de catálogo en producción:"
 curl -s "$URL/mcp" -H "authorization: Bearer $B" -H "content-type: application/json" -H "accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
-  | grep -o '"name":"\(actualizar_producto\|crear_producto\|renombrar_platillo\|renombrar_insumo\|renombrar_proveedor\)"' | sort -u
+  | grep -o '"name":"\(actualizar_producto\|crear_producto\|renombrar_platillo\|renombrar_insumo\)"' | sort -u
 echo "✓ LISTO. Ahora desconecta y reconecta el conector poster-rush en claude.ai."

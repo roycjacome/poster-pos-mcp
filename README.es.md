@@ -35,9 +35,8 @@ las 10 cuentas Póster de la red RUSH desde claude.ai (también en el celular), 
 `asignar_pago_compra` (storage.updateSupply: el botón "pagar" por API — asigna/reasigna la cuenta de Finanzas de una compra a crédito; relee y verifica que el total y los renglones no cambiaron).
 
 **Catálogo de red** (`src/tools/catalogo.ts`, módulo independiente): `actualizar_producto` y `crear_producto` (tipo 3, reventa sin receta),
-`renombrar_platillo` (tipo 2 con o sin receta: la reenvía y verifica), `renombrar_insumo`, `renombrar_proveedor`.
-⚠ Contratos de `menu.updateProduct`, `menu.createProduct`, `menu.updateIngredient` y `storage.updateSupplier` sin verificar en vivo:
-se releen y verifican tras aplicar (alerta si el precio queda 100× desviado). Probar primero en una sola cuenta.
+`renombrar_platillo` (tipo 2 con o sin receta: la reenvía y verifica), `renombrar_insumo`.
+Contrato de productos (docs oficiales): `modifications: 0` obligatorio (sin él: "modifications is empty"); con `different_spots_prices: 0`, `price` y `visible` van ESCALARES (centavos). La API no tiene `storage.updateSupplier`: los proveedores se renombran en el panel.
 Instalar encima de una copia local más nueva: `bash scripts/instalar-catalogo.sh "/ruta/a/poster-mcp"`.
 
 **Solo panel web**: editar la receta de un platillo existente (actualizar_platillo rechaza platillos con receta) y permisos de puestos.

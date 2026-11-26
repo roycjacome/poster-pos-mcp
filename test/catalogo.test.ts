@@ -1,4 +1,4 @@
-// Estandarizar catálogo: actualizar_producto, crear_producto, renombrar_insumo, renombrar_proveedor
+// Estandarizar catálogo: actualizar_producto, crear_producto, renombrar_insumo
 // y actualizar_platillo sobre platillos con receta (ej. galletas Chunky en toda la red).
 import { describe, it, expect, vi } from "vitest";
 import * as W from "../src/tools/catalogo.js";
@@ -30,15 +30,19 @@ function apiConEstado(inicial: Obj, opciones: { precioEnPesos?: boolean } = {}) 
   const post = vi.fn(async (_c: string, metodo: string, b: Obj) => {
     if (metodo === "menu.updateProduct") {
       const p = prods().find((x) => Number(x.product_id) === b.id);
+      if (b.modifications !== 0) return { error: 34, message: "modifications is empty" };
       p.product_name = b.product_name;
-      p.price = Object.fromEntries(Object.entries(b.price).map(([s, v]) => [s, String(opciones.precioEnPesos ? Number(v) / 100 : v)]));
-      p.spots = Object.entries(b.visible).map(([s, v]) => ({ spot_id: s, price: p.price[s], visible: String(v) }));
-      return { response: 1 };
+      const spots = Object.keys(p.price);
+      const pr = (s: string) => (b.different_spots_prices ? b.price[s] : b.price);
+      const vi = (s: string) => (b.different_spots_prices ? b.visible[s] : b.visible);
+      p.price = Object.fromEntries(spots.map((s) => [s, String(opciones.precioEnPesos ? Number(pr(s)) / 100 : pr(s))]));
+      p.spots = spots.map((s) => ({ spot_id: s, price: p.price[s], visible: String(vi(s)) }));
+      return { response: b.id };
     }
     if (metodo === "menu.createProduct") {
+      if (b.modifications !== 0) return { error: 34, message: "modifications is empty" };
       prods().push({ product_id: "900", product_name: b.product_name, menu_category_id: String(b.menu_category_id), type: "3", workshop: String(b.workshop),
-        price: Object.fromEntries(Object.entries(b.price).map(([s, v]) => [s, String(v)])),
-        spots: Object.entries(b.visible).map(([s, v]) => ({ spot_id: s, visible: String(v) })) });
+        price: { "1": String(b.price) }, spots: [{ spot_id: "1", price: String(b.price), visible: String(b.visible) }] });
       return { response: 900 };
     }
     if (metodo === "menu.updateDish") {
@@ -48,7 +52,7 @@ function apiConEstado(inicial: Obj, opciones: { precioEnPesos?: boolean } = {}) 
       return { response: 1 };
     }
     if (metodo === "menu.updateIngredient") {
-      const i = db["menu.getIngredients"].find((x: Obj) => Number(x.ingredient_id) === b.ingredient_id);
+      const i = db["menu.getIngredients"].find((x: Obj) => Number(x.ingredient_id) === b.id);
       i.ingredient_name = b.ingredient_name;
       return { response: 1 };
     }
@@ -86,7 +90,7 @@ describe("actualizar_producto (tipo 3)", () => {
     expect(r.modo).toBe("dry-run");
     expect(r.metodo).toBe("menu.updateProduct");
     expect(r.cambios).toEqual([{ campo: "product_name", antes: "Galleta Eve", despues: "CHUNKY CHISPAS" }]);
-    expect(r.payload).toMatchObject({ id: 638, product_id: 638, price: { "1": 5000 }, visible: { "1": 1 } });
+    expect(r.payload).toMatchObject({ id: 638, modifications: 0, different_spots_prices: 0, price: 5000, visible: 1, barcode: "" });
     expect(post).not.toHaveBeenCalled();
   });
 
@@ -107,7 +111,7 @@ describe("actualizar_producto (tipo 3)", () => {
   it("rechaza nombre duplicado y platillos tipo 2", async () => {
     const { api, post } = apiConEstado(base());
     await expect(W.actualizarProducto(ctx(api), { ...C, product_id: 638, nombre: "galleta triple chocolate eve" })).rejects.toThrow(/Ya existe/);
-    await expect(W.actualizarProducto(ctx(api), { ...C, product_id: 710, nombre: "X" })).rejects.toThrow(/actualizar_platillo/);
+    await expect(W.actualizarProducto(ctx(api), { ...C, product_id: 710, nombre: "X" })).rejects.toThrow(/renombrar_platillo/);
     expect(post).not.toHaveBeenCalled();
   });
 });
@@ -116,7 +120,7 @@ describe("crear_producto", () => {
   it("dry-run con precio en centavos y spots del hermano de categoría", async () => {
     const { api, post } = apiConEstado(base());
     const r: any = await W.crearProducto(ctx(api), { ...C, nombre: "CHUNKY MACADAMIA", categoria_id: 3, precio: 50 });
-    expect(r.payload).toEqual({ product_name: "CHUNKY MACADAMIA", menu_category_id: 3, workshop: 1, weight_flag: 0, color: "grey", price: { "1": 5000 }, visible: { "1": 1 } });
+    expect(r.payload).toEqual({ product_name: "CHUNKY MACADAMIA", menu_category_id: 3, workshop: 1, weight_flag: 0, color: "grey", different_spots_prices: 0, modifications: 0, price: 5000, visible: 1 });
     expect(post).not.toHaveBeenCalled();
   });
   it("aplica y verifica el producto nuevo", async () => {
@@ -146,20 +150,13 @@ describe("renombrar_platillo con receta", () => {
   });
 });
 
-describe("renombrar insumo y proveedor", () => {
+describe("renombrar insumo", () => {
   it("insumo: conserva categoría y unidad; verifica", async () => {
     const { api } = apiConEstado(base());
     const dry: any = await W.renombrarInsumo(ctx(api), { ...C, ingredient_id: 317, nombre: "CHUNKY CHISPAS" });
-    expect(dry.payload).toMatchObject({ ingredient_id: 317, ingredient_name: "CHUNKY CHISPAS", category_id: 2, type: "p" });
+    expect(dry.payload).toMatchObject({ id: 317, ingredient_name: "CHUNKY CHISPAS", category_id: 2, type: "p" });
     const r: any = await W.renombrarInsumo(ctx(api), { ...C, ingredient_id: 317, nombre: "CHUNKY CHISPAS", confirm: true });
     expect(r.verificacion.ok).toBe(true);
     await expect(W.renombrarInsumo(ctx(api), { ...C, ingredient_id: 317, nombre: "leche" })).rejects.toThrow(/Ya existe/);
-  });
-  it("proveedor: reenvía teléfono y comentario; rechaza duplicado", async () => {
-    const { api, post } = apiConEstado(base());
-    const r: any = await W.renombrarProveedor(ctx(api), { ...C, supplier_id: 21, nombre: "Evelyn Zavala · Chunky", confirm: true });
-    expect(post.mock.calls[0][2]).toMatchObject({ supplier_phone: "938 000 0000", supplier_comment: "Villa Marina" });
-    expect(r.verificacion.ok).toBe(true);
-    await expect(W.renombrarProveedor(ctx(api), { ...C, supplier_id: 21, nombre: "evelyn zavala" })).rejects.toThrow(/Ya existe/);
   });
 });
